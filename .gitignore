@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Local venv created by the build script
+.venv/
+
+# Build toolchain downloads (cpython, mpv-build, appimagetool)
+/dl/
+
+# Build artifacts (kept locally, not committed)
+build/dl/
+build/AppDir/
+build/dist/
+build/build/
+dist/
+*.AppImage
+
+# Caches / runtime
+*.tmp
+.DS_Store
+.pytest_cache/
