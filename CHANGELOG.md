@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-08-12
+
 ### Added
 - **Fast downloader (Nekogram-style parallel part fetch).** A single file is now split into contiguous byte ranges and each range is pulled concurrently with its own `iter_download` stream, hiding per-request latency and multiplying throughput without downloading more than one file at a time. Playback streaming keeps a strict contiguous on-disk order so mpv never reads a hole; explicit saves use the fastest mode. Concurrency is a safe, clamped setting (`download_concurrency`, default 4, max 8) exposed as "Download threads" in Settings.
 - **Drag-to-seek on the progress bar.** The seek bar now follows the pointer while you drag the handle (drag-to-scrub), not just tap-to-skip; playback seeks to the final position on release, and the position readout no longer fights an in-progress drag.
