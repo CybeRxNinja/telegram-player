@@ -21,7 +21,9 @@ VENV_PY_DIR="$ROOT/.venv/bin"
 export PATH="$VENV_PY_DIR:$PATH"
 
 APP_NAME="Telegram-Player"
-VERSION="0.1.17"
+# Derive the version from pyproject.toml so the AppImage filename always
+# matches the released version (no manual bump needed).
+VERSION="$(grep -m1 '^version = ' "$ROOT/pyproject.toml" | sed -E 's/version = "(.*)"/\1/')"
 APP_ID="telegram-player"
 OUT_IMG="$ROOT/dist/${APP_NAME}-${VERSION}-x86_64.AppImage"
 
