@@ -16,6 +16,7 @@ class Config:
     speed: float = 1.0  # playback speed multiplier; persists across the playlist and sessions
     mpv_extra_args: list[str] = field(default_factory=list)
     check_updates: bool = True  # periodically check GitHub Releases for a newer build
+    download_concurrency: int = 4  # parallel ranges per file (Nekogram-style fast download)
 
     # Paths are resolved once per process from XDG env vars.
     @staticmethod
@@ -58,6 +59,10 @@ class Config:
                 cfg.volume = max(0, min(100, int(cfg.volume)))
             if cfg.speed is not None:
                 cfg.speed = max(0.1, min(10.0, float(cfg.speed)))
+            if cfg.download_concurrency is not None:
+                # Clamp into the safe window: enough to saturate a link, not so
+                # many that the DC starts rate-limiting (FLOOD_WAIT).
+                cfg.download_concurrency = max(1, min(int(cfg.download_concurrency), 8))
             return cfg
         except (ValueError, TypeError, OSError):
             return cls()

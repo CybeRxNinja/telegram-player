@@ -19,6 +19,7 @@ Telegram API.
 - **Instant playback** — mpv embeds directly into the window; media streams from
   a localhost byte-range server that serves bytes as they arrive, so playback
   begins immediately and continues while the rest downloads in the background.
+- **Fast downloads** — explicit saves (the **Other** tab / **Download all**) use a Nekogram-style parallel part fetch: one file at a time, split into byte ranges pulled concurrently so a handful of in-flight requests saturates the link without hammering the DC. Tunable via **Download threads** in Settings (default 4, safe max 8).
 - **Multiple playlists with tabs** — keep several playlists, switch between them,
   create new ones with `+`, close (✕) to delete, double-click a tab to rename.
   The active playlist is saved and restored on launch.

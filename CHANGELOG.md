@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Fast downloader (Nekogram-style parallel part fetch).** A single file is now split into contiguous byte ranges and each range is pulled concurrently with its own `iter_download` stream, hiding per-request latency and multiplying throughput without downloading more than one file at a time. Playback streaming keeps a strict contiguous on-disk order so mpv never reads a hole; explicit saves use the fastest mode. Concurrency is a safe, clamped setting (`download_concurrency`, default 4, max 8) exposed as "Download threads" in Settings.
 - **In-app update checker.** `telegram_player/updater.py` periodically polls
   GitHub Releases (stable `latest` by version, plus the rolling `nightly` by
   build time) and shows a banner when a newer build exists. For AppImage runs

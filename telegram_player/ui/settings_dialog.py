@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
 )
 
@@ -38,11 +39,20 @@ class SettingsDialog(QDialog):
         self.check_updates.setToolTip(
             "Periodically check GitHub Releases for a newer build"
         )
+        self.threads = QSpinBox()
+        self.threads.setRange(1, 8)
+        self.threads.setValue(int(cfg.download_concurrency))
+        self.threads.setToolTip(
+            "Parallel byte-ranges fetched per file (Nekogram-style fast "
+            "download). Higher is faster but uses more connections; the app "
+            "clamps this to a safe limit."
+        )
 
         form = QFormLayout()
         form.addRow("API ID", self.api_id)
         form.addRow("API Hash", self.api_hash)
         form.addRow("Updates", self.check_updates)
+        form.addRow("Download threads", self.threads)
 
         hint = QLabel(
             'Get your credentials at <a href="https://my.telegram.org">my.telegram.org</a>. '
@@ -80,6 +90,7 @@ class SettingsDialog(QDialog):
             self.cfg.api_id = None
         self.cfg.api_hash = self.api_hash.text().strip() or None
         self.cfg.check_updates = self.check_updates.isChecked()
+        self.cfg.download_concurrency = self.threads.value()
         self.cfg.save()
         self.settings_changed.emit()
         self.accept()

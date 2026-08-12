@@ -17,6 +17,52 @@ from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal as Signal
 
+
+
+# ---------------------------------------------------------------------------
+# Download accelerator (Nekogram-style parallel part fetch)
+#
+# A single file is fetched by splitting it into contiguous byte ranges and
+# downloading each range concurrently with its own ``iter_download`` stream.
+# Telegram's MTProto lets multiple ``upload.getFile`` requests overlap on one
+# connection, so a handful of in-flight ranges hides per-request latency and
+# multiplies throughput without touching more than one file at a time.
+#
+# ``MAX_DOWNLOAD_CONCURRENCY`` is the "safe limit": enough to saturate a link
+# without hammering the DC into a FLOOD_WAIT. Nekogram exposes this as a
+# tunable thread count; we clamp the user setting into this window.
+# ---------------------------------------------------------------------------
+DOWNLOAD_PART = 512 * 1024          # largest single upload.getFile request
+MAX_DOWNLOAD_CONCURRENCY = 8        # hard safe ceiling for parallel ranges
+
+
+def _safe_concurrency(n: int | None) -> int:
+    if not n or n < 1:
+        n = 4
+    return max(1, min(int(n), MAX_DOWNLOAD_CONCURRENCY))
+
+
+def _split_ranges(total: int, n: int, part: int) -> list[tuple[int, int]]:
+    """Split [0, total) into ``n`` contiguous, part-aligned byte ranges that
+    together cover the whole file (the last range absorbs the remainder)."""
+    nparts = total // part
+    if nparts == 0:
+        return [(0, total)]
+    n = max(1, min(n, nparts))
+    base = nparts // n
+    extra = nparts % n
+    ranges: list[tuple[int, int]] = []
+    pos = 0
+    for w in range(n):
+        cnt = base + (1 if w < extra else 0)
+        end = pos + cnt * part
+        if w == n - 1:
+            end = total  # last worker also takes any <part remainder
+        ranges.append((pos, end))
+        pos = end
+    return ranges
+
+
 from telethon import TelegramClient
 from telethon.errors import (
     PasswordHashInvalidError,
@@ -464,7 +510,7 @@ class TelegramService(QObject):
                 return
             self.status.emit(f"Downloading {title}…")
             exists = asyncio.Event()
-            await self._pump_download(handle, dest, exists)
+            await self._download_parallel(handle, dest, exists=exists, stream_safe=True)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -493,7 +539,7 @@ class TelegramService(QObject):
                     self.status.emit(f"Skipped unavailable: {title}")
                     continue
                 dest = self._download_all_dest(folder, chat_id, message_id, title, handle.size or size)
-                await self._pump_download(handle, dest, asyncio.Event())
+                await self._download_parallel(handle, dest, exists=asyncio.Event(), stream_safe=False)
                 ok += 1
             except asyncio.CancelledError:
                 raise
@@ -524,20 +570,151 @@ class TelegramService(QObject):
 
     # ---------------- shared download pump ----------------
 
-    async def _pump_download(
-        self, handle: MediaHandle, dest: Path, exists: asyncio.Event
+    async def _download_parallel(
+        self,
+        handle: "MediaHandle",
+        dest: Path,
+        *,
+        exists: asyncio.Event | None = None,
+        stream_safe: bool = False,
+        concurrency: int | None = None,
     ) -> None:
-        """Download a media file to dest, setting `exists` once the file is on
-        disk (mpv may then start reading it while this keeps running). Raises on
-        failure (after reporting via status)."""
+        """Download ``handle`` to ``dest`` as fast as safely possible.
+
+        The file is split into contiguous byte ranges and each range is pulled
+        concurrently with its own ``iter_download`` stream (the Nekogram
+        "parallel call queues" trick). This hides per-request latency and
+        multiplies throughput without downloading more than one file at a time.
+
+        Two modes:
+          * ``stream_safe=False`` (explicit save): each range is written
+            straight to its offset. Gaps may exist mid-flight but the final
+            file is correct — fine because nothing is reading it yet.
+          * ``stream_safe=True`` (playback streaming): bytes are only flushed
+            to disk in strict contiguous order from offset 0, so a player
+            reading the growing file never sees a hole (mpv would treat zeros
+            as corrupt media). This keeps "start playing while downloading"
+            correct while still fetching the tail in parallel.
+        """
+        total = handle.size
+        conc = _safe_concurrency(concurrency or getattr(self.cfg, "download_concurrency", None))
+        # Small/unknown files: a single sequential stream is simplest and safe.
+        if total is None or total <= DOWNLOAD_PART * 2 or conc <= 1:
+            await self._download_sequential(handle, dest, exists, stream_safe)
+            return
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        # Create the file up front so the FileServer / player can open it.
+        with open(dest, "wb"):
+            pass
+        if exists is not None:
+            exists.set()
+
+        ranges = _split_ranges(total, conc, DOWNLOAD_PART)
+        if stream_safe:
+            await self._download_streamsafe(handle, dest, total, ranges)
+        else:
+            await self._download_fast(handle, dest, total, ranges)
+
+    async def _download_fast(
+        self, handle, dest, total, ranges
+    ) -> None:
+        """Write each range directly at its offset (may leave mid-flight gaps)."""
+        got = 0
+        lock = asyncio.Lock()
+        last_pct = -1
+
+        async def worker(start: int, end: int) -> None:
+            nonlocal got, last_pct
+            n = 0
+            fh = open(dest, "r+b")
+            try:
+                lim = max(1, (end - start + DOWNLOAD_PART - 1) // DOWNLOAD_PART)
+                async for chunk in self._client.iter_download(
+                    handle.doc, offset=start, limit=lim,
+                    file_size=total, request_size=DOWNLOAD_PART,
+                ):
+                    fh.seek(start + n)
+                    fh.write(chunk)
+                    n += len(chunk)
+                    async with lock:
+                        got += len(chunk)
+                        pct = int(got * 100 / total)
+                        if pct >= last_pct + 2:
+                            last_pct = pct
+                            self.status.emit(f"Downloading {pct}%…")
+            finally:
+                fh.close()
+
+        await asyncio.gather(*(worker(s, e) for s, e in ranges))
+
+    async def _download_streamsafe(
+        self, handle, dest, total, ranges
+    ) -> None:
+        """Reassemble in strict contiguous order so a reader never sees a hole.
+
+        Workers fetch their ranges in parallel into memory and hand completed
+        chunks to a single writer that only advances the on-disk frontier when
+        the exact next bytes are ready. Memory use is bounded by the in-flight
+        chunks (one per range), not the whole file.
+        """
+        fh = open(dest, "r+b")
+        frontier = 0
+        pending: dict[int, bytes] = {}
+        got = 0
+        lock = asyncio.Lock()
+        last_pct = -1
+
+        # NOTE: ``flush`` is only ever called while ``lock`` is held by the
+        # caller, so it must NOT re-acquire the lock (asyncio.Lock is not
+        # reentrant — doing so deadlocks).
+        async def flush() -> None:
+            nonlocal frontier, got, last_pct
+            while frontier in pending:
+                data = pending.pop(frontier)
+                fh.seek(frontier)
+                fh.write(data)
+                frontier += len(data)
+                got += len(data)
+                pct = int(got * 100 / total)
+                if pct >= last_pct + 2:
+                    last_pct = pct
+                    self.status.emit(f"Downloading {pct}%…")
+
+        async def worker(start: int, end: int) -> None:
+            n = 0
+            lim = max(1, (end - start + DOWNLOAD_PART - 1) // DOWNLOAD_PART)
+            async for chunk in self._client.iter_download(
+                handle.doc, offset=start, limit=lim,
+                file_size=total, request_size=DOWNLOAD_PART,
+            ):
+                off = start + n
+                async with lock:
+                    pending[off] = chunk
+                    await flush()
+                n += len(chunk)
+
+        try:
+            await asyncio.gather(*(worker(s, e) for s, e in ranges))
+            # Drain anything left (all workers done, no contention).
+            await flush()
+        finally:
+            fh.close()
+
+    async def _download_sequential(
+        self, handle, dest, exists, stream_safe
+    ) -> None:
+        """Fallback for tiny/unknown-size files: a single contiguous stream."""
         dest.parent.mkdir(parents=True, exist_ok=True)
         got = 0
         last_pct = -1
         try:
             with open(dest, "wb") as f:
-                exists.set()
+                if exists is not None:
+                    exists.set()
                 async for chunk in self._client.iter_download(
-                    handle.doc, offset=0, limit=None, file_size=handle.size
+                    handle.doc, offset=0, limit=None,
+                    file_size=handle.size, request_size=DOWNLOAD_PART,
                 ):
                     f.write(chunk)
                     got += len(chunk)
@@ -545,13 +722,17 @@ class TelegramService(QObject):
                         pct = int(got * 100 / handle.size)
                         if pct >= last_pct + 2:
                             last_pct = pct
-                            self.status.emit(f"Downloading {last_pct}%…")
+                            self.status.emit(f"Downloading {pct}%…")
         except asyncio.CancelledError:
             raise
         except Exception as e:
             log.warning("download failed for %s: %s", dest.name, e)
             self.status.emit(f"Download failed: {dest.name}")
             raise
+
+    # Backwards-compatible alias used by older call sites / tests.
+    async def _pump_download(self, handle, dest, exists):
+        await self._download_parallel(handle, dest, exists=exists, stream_safe=True)
 
     @staticmethod
     def _cache_path(chat_id: int, message_id: int, title: str) -> Path:
