@@ -58,8 +58,8 @@ jobs:
           pip install pyinstaller==6.22.0
 
       # Provide a static mpv so the AppImage build never has to compile mpv
-      # from source. Mirrors the build script's pkgforge fallback; cached
-      # between runs via the build/dl cache above.
+      # from source. Mirrors the build script's pkgforge fallback (extract the
+      # mpv AppImage into build/dl/mpv); cached between runs via build/dl.
       - name: Pre-seed mpv (static build)
         run: |
           set -e
@@ -69,11 +69,13 @@ jobs:
             URL="https://github.com/pkgforge-dev/mpv-AppImage/releases/download/v0.41.0@2026-07-01_1782914175/$PKG"
             curl -fsSL --retry 3 -o "build/dl/$PKG" "$URL"
             chmod +x "build/dl/$PKG"
-            ( cd build/dl && APPIMAGE_EXTRACT_AND_RUN=1 "../$PKG" --appimage-extract >/dev/null )
+            EXTRACT_DIR=build/dl/pkgforge-extract
+            rm -rf "$EXTRACT_DIR" && mkdir -p "$EXTRACT_DIR"
+            ( cd "$EXTRACT_DIR" && APPIMAGE_EXTRACT_AND_RUN=1 "../$PKG" --appimage-extract >/dev/null )
             mkdir -p build/dl/mpv build/dl/mpv-libs
-            cp -a build/dl/squashfs-root/shared/bin/mpv build/dl/mpv/mpv
-            cp -a build/dl/squashfs-root/lib/. build/dl/mpv-libs 2>/dev/null || true
-            rm -rf build/dl/squashfs-root
+            cp -a "$EXTRACT_DIR/squashfs-root/shared/bin/mpv" build/dl/mpv/mpv
+            cp -a "$EXTRACT_DIR/squashfs-root/lib/." build/dl/mpv-libs 2>/dev/null || true
+            rm -rf "$EXTRACT_DIR"
           fi
 
       - name: Set version from tag (stable releases only)
