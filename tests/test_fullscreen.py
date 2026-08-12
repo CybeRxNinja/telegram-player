@@ -127,7 +127,10 @@ def window(app):
     w.show()
     app.processEvents()
     yield w
-    w.close()
+    # Defer destruction to the event loop: a synchronous close() can abort
+    # during QWidget teardown under headless Qt (offscreen/xvfb). deleteLater
+    # runs it on the event loop in a safe context.
+    w.deleteLater()
     app.processEvents()
 
 

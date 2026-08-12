@@ -227,20 +227,36 @@ class _GlyphButton(QPushButton):
 
 
 class _JumpSlider(QSlider):
-    """QSlider that jumps the handle straight to the clicked position, so a
-    single tap anywhere on the track seeks there (tap-to-skip)."""
+    """QSlider that jumps the handle straight to the pointer, so a single tap
+    anywhere on the track seeks there (tap-to-skip) **and** the handle can be
+    dragged to scrub (drag-to-seek)."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # Make sure we receive move events even between presses.
+        self.setMouseTracking(True)
+
+    def _value_at(self, event) -> int:
+        frac = event.position().x() / max(1, self.width())
+        return round(self.minimum() + frac * (self.maximum() - self.minimum()))
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            frac = event.position().x() / max(1, self.width())
-            value = round(
-                self.minimum() + frac * (self.maximum() - self.minimum())
-            )
-            self.setValue(value)
+            self.setValue(self._value_at(event))
             self.setSliderDown(True)  # so the release emits sliderReleased
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        # While the button is held, follow the pointer so the handle can be
+        # dragged to scrub. _poll() is suppressed while isSliderDown(), so it
+        # won't fight the drag.
+        if self.isSliderDown() and (event.buttons() & Qt.MouseButton.LeftButton):
+            self.setValue(self._value_at(event))
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
         # Ending a press (tap or drag) with the slider down makes QSlider emit
@@ -250,6 +266,7 @@ class _JumpSlider(QSlider):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
 
 
 class _PlayerKeysFilter(QObject):
@@ -621,7 +638,7 @@ class MainWindow(QMainWindow):
         self.track_label = QLabel("Nothing playing"); self.track_label.setObjectName("title")
         self.seek = _JumpSlider(Qt.Orientation.Horizontal)
         self.seek.setRange(0, 1000)
-        self.seek.setToolTip("Click / tap anywhere on the bar to seek there")
+        self.seek.setToolTip("Click / tap anywhere on the bar to seek — or drag the handle to scrub")
         self.seek.sliderReleased.connect(self._on_seek_released)
         self.volume = _JumpSlider(Qt.Orientation.Horizontal)
         self.volume.setRange(0, 100)
@@ -1705,7 +1722,8 @@ class MainWindow(QMainWindow):
         dur = state.get("duration") or 0
         pos = state.get("position") or 0
         self.time_label.setText(f"{_fmt(pos)} / {_fmt(dur)}")
-        if dur:
+        if dur and not self.seek.isSliderDown():
+            # Don't fight a user who is tapping/dragging the seek bar.
             self.seek.blockSignals(True)
             self.seek.setValue(int((pos / dur) * 1000))
             self.seek.blockSignals(False)

@@ -16,14 +16,15 @@ os.environ["XDG_CONFIG_HOME"] = tempfile.mkdtemp(prefix="tp-ctl-cfg-")
 os.environ["XDG_DATA_HOME"] = tempfile.mkdtemp(prefix="tp-ctl-data-")
 
 import pytest
-from PyQt6.QtCore import QObject, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, Qt, pyqtSignal, QPointF
+from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
 from telegram_player.config import Config
 from telegram_player.playlist import PlaylistItem, PlaylistCollection
 from telegram_player.media import MediaItem
-from telegram_player.ui.main_window import MainWindow
+from telegram_player.ui.main_window import MainWindow, _JumpSlider
 
 
 class _FakeTg(QObject):
@@ -97,7 +98,9 @@ def win(app):
     w.show()
     app.processEvents()
     yield w
-    w.close()
+    # Defer destruction to the event loop: a synchronous close() can abort
+    # during QWidget teardown under headless Qt. deleteLater runs it safely.
+    w.deleteLater()
     app.processEvents()
 
 
@@ -490,3 +493,41 @@ def test_media_selected_or_whole_view(win, app):
     win._render_media(win._media_items)
     # nothing selected -> whole visible (filtered) view
     assert [i.message_id for i in win._selected_media()] == [90, 91]
+
+
+# ---------------- seek bar: tap AND drag-to-seek ----------------
+
+def _mouse_event(typ, x, buttons):
+    # Press/release report the involved button; move reports NoButton.
+    button = Qt.MouseButton.NoButton if typ == QEvent.Type.MouseMove else Qt.MouseButton.LeftButton
+    return QMouseEvent(typ, QPointF(x, 8), button, buttons, Qt.KeyboardModifier.NoModifier)
+
+
+def test_jumpslider_tap_and_drag():
+    s = _JumpSlider(Qt.Orientation.Horizontal)
+    s.setRange(0, 1000)
+    s.resize(1000, 20)
+    # Tap at 25% -> jumps there.
+    s.mousePressEvent(_mouse_event(QEvent.Type.MouseButtonPress, 250, Qt.MouseButton.LeftButton))
+    assert s.value() == 250
+    s.mouseReleaseEvent(_mouse_event(QEvent.Type.MouseButtonRelease, 250, Qt.MouseButton.NoButton))
+    # Drag: press at 25%, move to 75% while held -> handle follows pointer.
+    s.mousePressEvent(_mouse_event(QEvent.Type.MouseButtonPress, 250, Qt.MouseButton.LeftButton))
+    assert s.isSliderDown()
+    s.mouseMoveEvent(_mouse_event(QEvent.Type.MouseMove, 750, Qt.MouseButton.LeftButton))
+    assert s.value() == 750, "handle must follow the drag"
+    s.mouseReleaseEvent(_mouse_event(QEvent.Type.MouseButtonRelease, 750, Qt.MouseButton.NoButton))
+    assert not s.isSliderDown()
+
+
+def test_poll_does_not_overwrite_while_seeking(win):
+    # Simulate a live playback poll; with the slider held down (_JumpSlider
+    # sets it during tap/drag) the position must NOT be overwritten.
+    win.mpv._ipc = "x"  # enable _poll's early-out guard
+    win.seek.setSliderDown(True)
+    win.seek.setValue(300)
+    win._poll()
+    assert win.seek.value() == 300, "drag position must survive a poll"
+    win.seek.setSliderDown(False)
+    win._poll()
+    assert win.seek.value() == 100, "released -> follows playback (10/100)"
