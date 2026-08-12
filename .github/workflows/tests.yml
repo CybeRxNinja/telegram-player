@@ -9,9 +9,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      # Force software GL so Qt can create contexts under xvfb (no GPU).
-      LIBGL_ALWAYS_SOFTWARE: "1"
-      QT_QPA_PLATFORM: xcb
+      # offscreen is the most stable headless Qt platform for CI: no X server
+      # and no GL context teardown, which previously caused intermittent
+      # segfaults under xvfb.
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
 
@@ -20,10 +21,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install system deps (Qt xcb + EGL/GL runtimes)
+      - name: Install system deps (Qt/EGL runtime libs)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends             xvfb libegl1 libgl1 libgl1-mesa-dri libglu1-mesa             libglib2.0-0 libfontconfig1 libfreetype6 libxkbcommon0 libdbus-1-3             libxcb-xinerama0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1             libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-cursor0 libxcb-util1
+          sudo apt-get install -y --no-install-recommends             libegl1 libgl1 libglib2.0-0 libfontconfig1 libfreetype6             libxkbcommon0 libdbus-1-3 libxcb-xinerama0 libxcb-icccm4             libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0             libxcb-shape0 libxcb-cursor0 libxcb-util1
 
       - name: Install Python deps
         run: |
@@ -31,6 +32,5 @@ jobs:
           pip install -e .
           pip install pytest
 
-      - name: Run tests under xvfb
-        run: |
-          xvfb-run -a -s "-screen 0 1280x800x24" python -m pytest -q
+      - name: Run tests
+        run: python -m pytest -q

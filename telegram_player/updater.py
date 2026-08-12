@@ -165,30 +165,47 @@ class UpdateChecker(QObject):
     def start(self, initial_delay_ms: int = 5000) -> None:
         if not self.enabled:
             return
+        self._timer.setSingleShot(False)
         self._timer.start(self.interval_ms)
-        QTimer.singleShot(initial_delay_ms, self.check)
+        # One-shot initial check (also cancellable via stop()).
+        self._init_timer = QTimer(self)
+        self._init_timer.setSingleShot(True)
+        self._init_timer.timeout.connect(self.check)
+        self._init_timer.start(initial_delay_ms)
 
     def stop(self) -> None:
         self._timer.stop()
+        init = getattr(self, "_init_timer", None)
+        if init is not None:
+            init.stop()
 
     def check(self) -> None:
         if not self.enabled:
             return
+        threading.Thread(target=self._check_worker, daemon=True).start()
+
+    def _check_worker(self) -> None:
         try:
             current = current_version()
             rel = fetch_release("latest")
-            if rel is not None and is_newer(rel.tag, current):
+            if rel is not None and is_newer(rel.tag, current) and self.enabled:
                 self.update_available.emit(rel)
                 return
             ap = appimage_path()
             if ap is not None:
                 nightly = fetch_release("nightly")
-                if nightly is not None and _nightly_newer(nightly, ap):
+                if (
+                    nightly is not None
+                    and _nightly_newer(nightly, ap)
+                    and self.enabled
+                ):
                     self.update_available.emit(nightly)
                     return
-            self.no_update.emit()
+            if self.enabled:
+                self.no_update.emit()
         except (URLError, HTTPError, ValueError, KeyError) as e:
-            self.error.emit(str(e))
+            if self.enabled:
+                self.error.emit(str(e))
 
     def apply_update(self, info: ReleaseInfo, on_done=None) -> None:
         """Download + apply in a worker thread (keeps the UI responsive)."""

@@ -806,6 +806,15 @@ class MainWindow(QMainWindow):
         else:
             self._updater.stop()
             self.update_banner.hide()
+
+    def closeEvent(self, e) -> None:
+        # Stop the update poller before Qt tears the window down, so a pending
+        # timer/thread can never fire into a half-destroyed MainWindow.
+        upd = getattr(self, "_updater", None)
+        if upd is not None:
+            upd.enabled = False
+            upd.stop()
+        super().closeEvent(e)
     def _open_help(self) -> None:
         """Small always-available cheat sheet so the app explains its own
         shortcuts instead of hiding them."""
