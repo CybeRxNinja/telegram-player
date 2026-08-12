@@ -27,6 +27,9 @@ Telegram API.
   inactivity and return on movement.
 - **Centered, crisp transport icons**, volume control, playback-speed menu, and
   a keyboard-shortcut set (see [docs/KEYBOARD.md](docs/KEYBOARD.md)).
+- **Automatic updates** — in the background the app checks GitHub
+  Releases and offers to download and apply a newer build (one click on
+  AppImage; opens the release page otherwise). Toggle it in **Settings**.
 - **Local-first & private** — no accounts, no telemetry, no third-party
   servers. See [PRIVACY.md](PRIVACY.md).
 

@@ -15,6 +15,7 @@ class Config:
     volume: int = 100
     speed: float = 1.0  # playback speed multiplier; persists across the playlist and sessions
     mpv_extra_args: list[str] = field(default_factory=list)
+    check_updates: bool = True  # periodically check GitHub Releases for a newer build
 
     # Paths are resolved once per process from XDG env vars.
     @staticmethod

@@ -3,6 +3,27 @@
 All notable changes to Telegram Player are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Added
+- **In-app update checker.** `telegram_player/updater.py` periodically polls
+  GitHub Releases (stable `latest` by version, plus the rolling `nightly` by
+  build time) and shows a banner when a newer build exists. For AppImage runs
+  the "Update" action downloads the new `.AppImage` and replaces the running
+  file in place (then relaunches); otherwise it opens the release page. A
+  "Check for updates automatically" toggle in Settings controls it.
+- **Dependency updater.** `.github/dependabot.yml` opens weekly PRs to bump
+  Python dependencies (telethon / PyQt6 / segno) and GitHub Actions.
+- **Scheduled release workflow.** `.github/workflows/release.yml` builds the
+  AppImage on a weekly cron (rolling `nightly` prerelease) and on manual
+  dispatch (stable tag), so fresh builds ship at a regular interval.
+
+### Fixed
+- **CI tests.** The GitHub runner was missing `libEGL.so.1`, so importing
+  `PyQt6.QtGui`/`QtTest` failed with `ImportError`. The workflow now installs
+  the Qt/EGL runtime libraries and `pip install -e .`, and forces software GL
+  under xvfb.
+
 ## [0.1.17] - 2026-08-12
 
 ### Added

@@ -49,6 +49,7 @@ from ..media import ChatInfo
 from ..mpv_ctl import MpvCtl
 from ..playlist import PlaylistItem, PlaylistCollection
 from ..tg_client import PasswordNeeded, TelegramService
+from ..updater import UpdateChecker, ReleaseInfo, appimage_path
 from .settings_dialog import SettingsDialog
 from .login_dialog import LoginDialog
 
@@ -504,10 +505,14 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout()
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
+        self.update_banner = self._make_update_banner()
+        self.update_banner.hide()
+        outer.addWidget(self.update_banner)
         outer.addWidget(root, 1)
         outer.addWidget(self.transport)
         container = QWidget(); container.setLayout(outer)
         self.setCentralWidget(container)
+        self._pending_update: ReleaseInfo | None = None
         root.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         right.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         # Double-click on the video toggles fullscreen (standard player UX).
@@ -692,6 +697,67 @@ class MainWindow(QMainWindow):
         self._setup_player_keys()
         self._setup_fading_controls()
 
+        # Periodic update check against GitHub Releases.
+        self._updater = UpdateChecker(enabled=self.cfg.check_updates)
+        self._updater.update_available.connect(self._on_update_available)
+        self._updater.no_update.connect(self.update_banner.hide)
+        self._updater.error.connect(lambda _e: self.update_banner.hide())
+        self._updater.download_progress.connect(self._on_update_progress)
+        self._updater.start()
+
+    # ---------------- update checker ----------------
+    def _make_update_banner(self) -> QWidget:
+        from .theme import uppercase_button
+
+        bar = QWidget()
+        bar.setObjectName("updateBanner")
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(10, 6, 10, 6)
+        lay.setSpacing(8)
+        self.update_label = QLabel("Update available")
+        self.update_label.setObjectName("updateText")
+        self._btn_update = QPushButton("Update")
+        self._btn_update.setObjectName("accent")
+        uppercase_button(self._btn_update)
+        btn_later = QPushButton("Later")
+        btn_later.setObjectName("ghost")
+        uppercase_button(btn_later)
+        lay.addWidget(self.update_label, 1)
+        lay.addWidget(self._btn_update)
+        lay.addWidget(btn_later)
+        self._btn_update.clicked.connect(self._on_update_click)
+        btn_later.clicked.connect(bar.hide)
+        return bar
+
+    def _on_update_available(self, info: ReleaseInfo) -> None:
+        self._pending_update = info
+        is_appimage = appimage_path() is not None
+        self._btn_update.setText("UPDATE" if is_appimage else "OPEN")
+        self.update_label.setText(
+            f"A new build is available: {info.name}  ·  "
+            + ("update & restart" if is_appimage else "open release page")
+        )
+        self.update_banner.show()
+
+    def _on_update_click(self) -> None:
+        info = self._pending_update
+        if info is None:
+            return
+        self._btn_update.setEnabled(False)
+        self._btn_update.setText("DOWNLOADING…")
+        self._updater.apply_update(info, on_done=self._on_update_done)
+
+    def _on_update_progress(self, done: int, total: int) -> None:
+        if total:
+            self._btn_update.setText(f"DOWNLOADING… {done * 100 // total}%")
+
+    def _on_update_done(self, err: str | None) -> None:
+        if err:
+            self.update_label.setText(f"Update failed: {err}")
+            self._btn_update.setEnabled(True)
+            self._btn_update.setText("RETRY")
+        # On AppImage success the process is replaced and this never returns.
+
     # ---------------- status / auth ----------------
     def _refresh_status(self) -> None:
         self._on_status("Starting…")
@@ -725,8 +791,21 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         dlg = SettingsDialog(self.cfg, self)
+        dlg.settings_changed.connect(self._on_settings_changed)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.tg.apply_credentials()
+
+    def _on_settings_changed(self) -> None:
+        # Reflect the new update-check preference on the live checker.
+        enabled = self.cfg.check_updates
+        if getattr(self, "_updater", None) is None:
+            return
+        self._updater.enabled = enabled
+        if enabled:
+            self._updater.start()
+        else:
+            self._updater.stop()
+            self.update_banner.hide()
     def _open_help(self) -> None:
         """Small always-available cheat sheet so the app explains its own
         shortcuts instead of hiding them."""

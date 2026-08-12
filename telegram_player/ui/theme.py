@@ -96,6 +96,22 @@ QPushButton#accentRound {{
 }}
 QPushButton#accentRound:hover {{ background-color: {ACCENT_HOVER}; }}
 QPushButton#accentRound:pressed {{ background-color: {ACCENT_PRESSED}; }}
+
+QWidget#updateBanner {{
+    background-color: {ACCENT};
+}}
+QLabel#updateText {{
+    color: #06121C;
+    font-weight: 700;
+}}
+QPushButton#ghost {{
+    background: transparent;
+    color: #06121C;
+    border: 1px solid rgba(6, 18, 28, 0.45);
+    border-radius: 8px;
+    padding: 4px 14px;
+}}
+QPushButton#ghost:hover {{ background: rgba(6, 18, 28, 0.12); }}
 QPushButton#danger {{ color: {DANGER}; }}
 QPushButton#danger:hover {{ background-color: rgba(243, 114, 127, 0.12); color: {DANGER}; }}
 QPushButton#transport {{

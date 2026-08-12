@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QFormLayout,
     QLabel,
@@ -15,6 +17,7 @@ from ..config import Config
 
 
 class SettingsDialog(QDialog):
+    settings_changed = pyqtSignal()
     def __init__(self, cfg: Config, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
@@ -30,9 +33,16 @@ class SettingsDialog(QDialog):
         if cfg.api_hash:
             self.api_hash.setText(cfg.api_hash)
 
+        self.check_updates = QCheckBox("Check for updates automatically")
+        self.check_updates.setChecked(bool(cfg.check_updates))
+        self.check_updates.setToolTip(
+            "Periodically check GitHub Releases for a newer build"
+        )
+
         form = QFormLayout()
         form.addRow("API ID", self.api_id)
         form.addRow("API Hash", self.api_hash)
+        form.addRow("Updates", self.check_updates)
 
         hint = QLabel(
             'Get your credentials at <a href="https://my.telegram.org">my.telegram.org</a>. '
@@ -69,5 +79,7 @@ class SettingsDialog(QDialog):
         else:
             self.cfg.api_id = None
         self.cfg.api_hash = self.api_hash.text().strip() or None
+        self.cfg.check_updates = self.check_updates.isChecked()
         self.cfg.save()
+        self.settings_changed.emit()
         self.accept()
