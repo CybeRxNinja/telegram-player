@@ -96,7 +96,7 @@ jobs:
           git push --delete origin nightly || true
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag || 'nightly' }}
           prerelease: ${{ github.event.inputs.prerelease || true }}
