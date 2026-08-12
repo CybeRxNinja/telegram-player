@@ -83,7 +83,7 @@ jobs:
         run: |
           VER="${{ github.event.inputs.tag }}"
           VER="${VER#v}"
-          sed -i "s/^version = .*/version = "$VER"/" pyproject.toml
+          sed -i "s/^version = .*/version = \"$VER\"/" pyproject.toml
 
       # The build script bootstraps its own Python from a cpython-standalone
       # download when .venv is absent. Reuse the runner's Python instead so
