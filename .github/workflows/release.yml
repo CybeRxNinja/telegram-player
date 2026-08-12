@@ -85,6 +85,12 @@ jobs:
           VER="${VER#v}"
           sed -i "s/^version = .*/version = "$VER"/" pyproject.toml
 
+      # The build script bootstraps its own Python from a cpython-standalone
+      # download when .venv is absent. Reuse the runner's Python instead so
+      # the build is fast and doesn't depend on that external tarball.
+      - name: Create build venv
+        run: python -m venv .venv && .venv/bin/pip install --upgrade pip wheel
+
       - name: Build AppImage
         run: |
           mkdir -p build/dl
