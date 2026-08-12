@@ -63,6 +63,7 @@ jobs:
       - name: Pre-seed mpv (static build)
         run: |
           set -e
+          mkdir -p build/dl
           if [ ! -x build/dl/mpv/mpv ]; then
             PKG=mpv-v0.41.0-anylinux-x86_64.AppImage
             URL="https://github.com/pkgforge-dev/mpv-AppImage/releases/download/v0.41.0@2026-07-01_1782914175/$PKG"
@@ -83,7 +84,9 @@ jobs:
           sed -i "s/^version = .*/version = "$VER"/" pyproject.toml
 
       - name: Build AppImage
-        run: bash build/build_appimage.sh
+        run: |
+          mkdir -p build/dl
+          bash build/build_appimage.sh
 
       # Rolling nightly: remove the previous release/tag before recreating.
       - name: Delete previous nightly (rolling)
