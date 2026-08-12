@@ -21,3 +21,11 @@ dist/
 *.tmp
 .DS_Store
 .pytest_cache/
+
+# Runtime secrets / local state (never commit these)
+*.session
+*.session-journal
+config.json
+playlist.json
+playlists.json
+*.local
