@@ -42,6 +42,10 @@ def test_descendant_helper_live_display():
 
     if not os.environ.get("DISPLAY"):
         pytest.skip("no X display")
+    # Walking the live X window tree is only safe on a real, interactive
+    # display. Under headless CI (xvfb + software GL) it can segfault, so skip.
+    if os.environ.get("GITHUB_ACTIONS") or os.environ.get("LIBGL_ALWAYS_SOFTWARE") == "1":
+        pytest.skip("live X11 tree walk is unreliable under headless CI")
     lib = ctypes.CDLL(ctypes.util.find_library("X11") or "libX11.so.6")
     lib.XOpenDisplay.restype = ctypes.c_void_p
     dpy = lib.XOpenDisplay(None)
