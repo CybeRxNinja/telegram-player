@@ -28,7 +28,7 @@ from telethon.errors import (
 from .config import Config
 from .file_server import FileServer
 from .media import ChatInfo, MediaHandle, MediaItem, video_title
-from .playlist import filter_videos
+from .playlist import classify_media
 
 log = logging.getLogger(__name__)
 
@@ -306,13 +306,13 @@ class TelegramService(QObject):
             msgs = await self._client.get_messages(
                 chat_id, reply_to=topic_id, limit=limit, offset_id=offset, reverse=False
             )
-            return filter_videos(msgs)
+            return classify_media(msgs)
         if offset:
             # "Load more": paginate within the same chat as the first load.
             msgs = await self._client.get_messages(
                 chat_id, limit=limit, offset_id=offset, reverse=False
             )
-            return filter_videos(msgs)
+            return classify_media(msgs)
         # First load: detect forum channels so their per-topic media is gathered.
         entity = await self._client.get_entity(chat_id)
         if getattr(entity, "forum", False):
@@ -320,7 +320,7 @@ class TelegramService(QObject):
         msgs = await self._client.get_messages(
             chat_id, limit=limit, offset_id=0, reverse=False
         )
-        return filter_videos(msgs)
+        return classify_media(msgs)
 
     async def load_topics(self, chat_id: int) -> list[tuple[int, str]]:
         """Forum topics as (topic_id, title), newest first; [] if not a forum."""
@@ -367,7 +367,7 @@ class TelegramService(QObject):
             msgs = await self._client.get_messages(
                 chat_id, limit=limit, offset_id=0, reverse=False
             )
-            return filter_videos(msgs)
+            return classify_media(msgs)
         per = max(1, limit // len(topics) + 1)
         out: list[MediaItem] = []
         for t in topics:
@@ -375,7 +375,7 @@ class TelegramService(QObject):
                 msgs = await self._client.get_messages(
                     chat_id, reply_to=t.id, limit=per, reverse=False
                 )
-                out.extend(filter_videos(msgs))
+                out.extend(classify_media(msgs))
             except Exception as e:
                 log.warning("topic %s (%s) failed: %s", t.id, getattr(t, "title", "?"), e)
         out.sort(key=lambda m: m.message_id, reverse=True)  # newest first
@@ -427,6 +427,7 @@ class TelegramService(QObject):
             self.playback_failed.emit("No playable items")
 
     # ---------------- on-demand download of the currently played item ----------------
+        return entries
 
     def download_item(self, chat_id: int, message_id: int, title: str, size: int | None) -> None:
         """Download one playlist item into the cache, replacing any in-flight

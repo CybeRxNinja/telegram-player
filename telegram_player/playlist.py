@@ -18,6 +18,7 @@ class PlaylistItem:
     title: str
     duration: float | None = None
     size: int | None = None
+    kind: str = "video"  # video | audio | photo | gif | other
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -30,46 +31,89 @@ class PlaylistItem:
             title=str(d["title"]),
             duration=d.get("duration"),
             size=d.get("size"),
+            kind=d.get("kind", "video"),
         )
 
 
-def _video_duration(m) -> float | None:
-    try:
-        from telethon.tl.types import DocumentAttributeVideo
+def _media_kind(m) -> str | None:
+    """Classify a Telethon message into a media kind, or None to skip.
 
-        for attr in m.document.attributes or ():
-            if isinstance(attr, DocumentAttributeVideo) and attr.duration:
-                return float(attr.duration)
+    video | audio | photo | gif | other — see classify_media().
+    """
+    if m.media is None or isinstance(m.media, MessageMediaWebPage):
+        return None
+    if getattr(m, "photo", None) is not None:
+        return "photo"
+    doc = getattr(m, "document", None)
+    if doc is None:
+        return None
+    mime = getattr(doc, "mime_type", None) or ""
+    attrs = getattr(doc, "attributes", None) or ()
+    animated = any(
+        getattr(a, "cls", None) == "DocumentAttributeAnimated"
+        or type(a).__name__ == "DocumentAttributeAnimated"
+        for a in attrs
+    )
+    if mime.startswith("image/gif") or (mime.startswith("video/") and animated):
+        return "gif"
+    if mime.startswith("video/"):
+        return "video"
+    if mime.startswith("audio/"):
+        return "audio"
+    return "other"
+
+
+def _media_duration(m) -> float | None:
+    """Duration in seconds from a video or audio document attribute."""
+    for attr in (getattr(m, "document", None) and m.document.attributes) or ():
+        dur = getattr(attr, "duration", None)
+        if dur:
+            return float(dur)
+    return None
+
+
+def _media_size(m) -> int | None:
+    try:
+        if getattr(m, "photo", None) is not None:
+            sizes = getattr(m.photo, "sizes", None)
+            if sizes:
+                return getattr(sizes[-1], "size", None)
+        doc = getattr(m, "document", None)
+        if doc is not None:
+            return getattr(doc, "size", None)
+        f = getattr(m, "file", None)
+        if f is not None:
+            return getattr(f, "size", None)
     except AttributeError:
         pass
     return None
 
 
-def filter_videos(messages) -> list[MediaItem]:
-    """Reduce a list of Telethon messages to video MediaItems, in input order.
-
-    Accepts anything with the Telethon message attribute surface (tests use
-    fakes). Webpage embeds and messages without media are skipped.
-    """
+def classify_media(messages) -> list[MediaItem]:
+    """Return all media-bearing messages as MediaItems with a `kind`, in input
+    order. Webpage embeds and messages without media are skipped. The UI groups
+    these into media-type tabs (Videos / Audio / Photos & GIF / Other)."""
     out: list[MediaItem] = []
     for m in messages:
-        if m.media is None or isinstance(m.media, MessageMediaWebPage):
-            continue
-        doc = getattr(m, "document", None)
-        video = getattr(m, "video", None)
-        mime = getattr(doc, "mime_type", None)
-        if not (video is not None or (doc is not None and mime is not None and mime.startswith("video/"))):
+        kind = _media_kind(m)
+        if kind is None:
             continue
         out.append(
             MediaItem(
                 chat_id=m.chat_id,
                 message_id=m.id,
                 title=video_title(m),
-                duration=_video_duration(m),
-                size=getattr(doc, "size", None),
+                duration=_media_duration(m),
+                size=_media_size(m),
+                kind=kind,
             )
         )
     return out
+
+
+def filter_videos(messages) -> list[MediaItem]:
+    """Back-compat helper: only the `video` items from classify_media()."""
+    return [i for i in classify_media(messages) if i.kind == "video"]
 
 
 class PlaylistStore:

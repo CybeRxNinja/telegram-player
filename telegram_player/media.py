@@ -12,6 +12,7 @@ class MediaItem:
     title: str
     duration: float | None = None
     size: int | None = None
+    kind: str = "video"  # video | audio | photo | gif | other
 
 
 @dataclass

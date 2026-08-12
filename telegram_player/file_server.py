@@ -65,11 +65,20 @@ class _FileHandler(BaseHTTPRequestHandler):
         # Wait until the requested bytes exist or the download finishes. The
         # file may not exist yet at all (URLs are registered before their
         # download starts), so wait for it to appear too.
+        #
+        # For an OPEN range (no end, as a player uses to start streaming) we
+        # serve whatever bytes already exist the moment they appear — this is
+        # what lets playback begin before the whole file has downloaded. A
+        # specific range (end set) still waits until that exact slice is
+        # available.
         deadline = time.monotonic() + _STALL
         last_size = -1
         while True:
             size = _fsize(path)
-            need = (end + 1) if end is not None else (expected if expected is not None else 0)
+            if end is not None:
+                need = end + 1
+            else:
+                need = 1  # open range: stream as soon as any bytes exist
             if size >= 0 and size >= need:
                 break
             if size == last_size and time.monotonic() >= deadline:

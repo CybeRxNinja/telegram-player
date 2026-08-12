@@ -13,9 +13,12 @@ Telegram API.
 
 - **Login your way** — QR code (scan with the official app) or phone + code + 2FA.
 - **Chat & media browser** — filter chats, drill into forum topics, and load a
-  channel or group's videos into a sortable table.
-- **Instant playback** — mpv embeds directly into the window; video streams from
-  a localhost byte-range server so it begins before the download completes.
+  channel or group's media into a sortable table. Media-type tabs
+  (**Videos / Audio / Photos & GIF / Other**) keep each category separate; the
+  **Other** tab (PDFs, archives, …) offers **Download** instead of playback.
+- **Instant playback** — mpv embeds directly into the window; media streams from
+  a localhost byte-range server that serves bytes as they arrive, so playback
+  begins immediately and continues while the rest downloads in the background.
 - **Multiple playlists with tabs** — keep several playlists, switch between them,
   create new ones with `+`, close (✕) to delete, double-click a tab to rename.
   The active playlist is saved and restored on launch.

@@ -119,3 +119,38 @@ def test_load_topics_returns_id_title_pairs():
     topics = asyncio.run(svc.load_topics(123))
     assert topics == [(3, "T3"), (4, "T4")]
 
+
+
+# ---------------- streaming (instant playback) design ----------------
+def test_play_playlist_streams_without_downloading(tmp_path):
+    """play_playlist must register localhost URLs and NOT download bytes; the
+    file is served by the FileServer as it grows, so playback can start before
+    the download finishes."""
+    import asyncio
+    import urllib.request
+    from pathlib import Path
+
+    svc = TelegramService(Config())
+    # Keep the registered cache file inside tmp so the test is hermetic and not
+    # affected by any previously cached clips.
+    def _cache_path(cid, mid, title):
+        return tmp_path / f"{cid}_{mid}.mp4"
+    svc._cache_path = _cache_path
+    svc._file_server.start()
+    try:
+        items = [(123, 9, "clip.mp4", 1000)]
+        entries = asyncio.run(svc._register_playlist_async(items))
+        assert entries, "expected at least one entry"
+        url = entries[0][0]
+        assert url.startswith("http://127.0.0.1"), url
+        # No download happened: the registered path does not exist yet.
+        token = url.rsplit("/", 1)[1]
+        path = svc._file_server.tokens[token][0]
+        assert not Path(path).exists(), "playlist should not pre-download"
+        # Simulate the download writing bytes; the server must now serve them.
+        Path(path).write_bytes(b"PARTIAL-DATA")
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            body = resp.read()
+        assert body == b"PARTIAL-DATA"
+    finally:
+        svc._file_server.close()

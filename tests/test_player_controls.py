@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import QApplication
 
 from telegram_player.config import Config
 from telegram_player.playlist import PlaylistItem, PlaylistCollection
+from telegram_player.media import MediaItem
 from telegram_player.ui.main_window import MainWindow
 
 
@@ -441,3 +442,51 @@ def test_play_selected_writes_into_active_playlist(win, app):
     win._play_selected()
     assert [i.message_id for i in win.playlists.items()] == [5]
     assert win.playlists.active == 1  # wrote into the active (new) playlist
+
+
+# ---------------- media-type filter tabs ----------------
+def _media_items():
+    # Distinct message ids (90+) so they don't collide with playlists persisted
+    # by sibling tests into the shared XDG_CONFIG_HOME.
+    return [
+        MediaItem(1, 90, "Vid A", 10, 100, "video"),
+        MediaItem(1, 91, "Vid B", 20, 200, "video"),
+        MediaItem(1, 92, "Song", 30, 300, "audio"),
+        MediaItem(1, 93, "Pic", None, 400, "photo"),
+        MediaItem(1, 94, "Doc.pdf", None, 500, "other"),
+    ]
+
+
+def test_media_tab_filters_by_kind(win, app):
+    win._media_items = _media_items()
+    win._media_kind_filter = win._media_tab_defs[0][1]  # Videos
+    win._render_media(win._media_items)
+    assert win.media_table.rowCount() == 2
+    assert {win.media_table.item(r, 0).text() for r in range(2)} == {"Vid A", "Vid B"}
+    # switch to Other tab
+    win.media_tabs.setCurrentIndex(3)
+    win._on_media_tab_changed(3)
+    assert win.media_table.rowCount() == 1
+    assert win.media_table.item(0, 0).text() == "Doc.pdf"
+    assert win.btn_play_media.text() == "DOWNLOAD"  # non-playable -> download
+
+
+def test_media_play_on_other_tab_downloads_not_plays(win, app):
+    win._media_items = _media_items()
+    win.media_tabs.setCurrentIndex(3)            # Other
+    win._on_media_tab_changed(3)
+    seen = []
+    win.tg.download_all = lambda items: seen.append(items)
+    win._play_selected()                          # nothing selected -> whole tab
+    assert seen, "Other tab 'Play' should download"
+    # The non-playable doc (mid 94) was downloaded, not added to a playlist.
+    assert seen[0][0][1] == 94
+    assert all(i.message_id != 94 for i in win.playlists.items())
+
+
+def test_media_selected_or_whole_view(win, app):
+    win._media_items = _media_items()
+    win._media_kind_filter = win._media_tab_defs[0][1]
+    win._render_media(win._media_items)
+    # nothing selected -> whole visible (filtered) view
+    assert [i.message_id for i in win._selected_media()] == [90, 91]

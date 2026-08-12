@@ -357,17 +357,37 @@ class MainWindow(QMainWindow):
         self.media_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.media_table.verticalHeader().setVisible(False)
         self.btn_play_media = QPushButton("▶ Play")
-        self.btn_add = QPushButton("＋ Add to playlist")
+        self.btn_add = QPushButton("+ Add to playlist")
         self.btn_load_more = QPushButton("Load more…")
         for _b in (self.btn_play_media, self.btn_add, self.btn_load_more):
             uppercase_button(_b)
         self.media_header = QLabel("MEDIA")
         self.media_header.setObjectName("panelHeader")
         self.empty_media = self._make_empty(self.media_table, "Pick a chat to see its videos")
+        # Media-type filter tabs (like the playlist tabs): Videos / Audio /
+        # Photos & GIF / Other. The visible list is filtered by the active tab;
+        # "▶ Play" plays video/audio/photos/gifs, while the "Other" tab (files
+        # mpv cannot play) is a download-only action.
+        self._media_tab_defs = [
+            ("Videos", {"video"}),
+            ("Audio", {"audio"}),
+            ("Photos & GIF", {"photo", "gif"}),
+            ("Other", {"other"}),
+        ]
+        self._media_kind_filter = self._media_tab_defs[0][1]
+        self._media_items: list = []
+        self._media_shown: list = []
+        self.media_tabs = QTabBar()
+        self.media_tabs.setDocumentMode(True)
+        self.media_tabs.setExpanding(False)
+        self.media_tabs.setToolTip("Filter media by type")
+        for label, _ in self._media_tab_defs:
+            self.media_tabs.addTab(label)
         mcol = QVBoxLayout(self.media_panel)
         mcol.setContentsMargins(0, 10, 0, 0)
         mcol.setSpacing(6)
         mcol.addWidget(self.media_header)
+        mcol.addWidget(self.media_tabs)
         mcol.addWidget(self.media_table, 1)
         mrow = QHBoxLayout()
         mrow.addWidget(self.btn_play_media)
@@ -440,9 +460,9 @@ class MainWindow(QMainWindow):
         self.playlist_tabs.setToolTip(
             "Double-click a tab to rename · close (✕) to delete"
         )
-        self.btn_new_playlist = QPushButton("＋")
+        self.btn_new_playlist = QPushButton("+")
         self.btn_new_playlist.setFixedSize(28, 28)
-        self.btn_new_playlist.setObjectName("accent")
+        self.btn_new_playlist.setObjectName("accentRound")
         self.btn_new_playlist.setToolTip("Create a new playlist")
         self.playlist_count = QLabel()
         self.playlist_count.setObjectName("meta")
@@ -528,10 +548,12 @@ class MainWindow(QMainWindow):
         else:
             self.empty_chats.hide()
         if self.media_table.rowCount() == 0:
-            self.empty_media.setText(
-                "Pick a chat to see its videos" if self._current_chat is None
-                else "No videos here yet"
-            )
+            if self._current_chat is None:
+                msg = "Pick a chat to see its media"
+            else:
+                tab = self._media_tab_defs[self.media_tabs.currentIndex()][0]
+                msg = f"No {tab.lower()} here yet"
+            self.empty_media.setText(msg)
             self.empty_media.setGeometry(self.media_table.rect())
             self.empty_media.raise_()
             self.empty_media.show()
@@ -644,6 +666,7 @@ class MainWindow(QMainWindow):
         self.btn_refresh.clicked.connect(lambda: self.tg.refresh_chats())
         self.media_table.cellDoubleClicked.connect(self._on_media_double)
         self.btn_play_media.clicked.connect(self._play_selected)
+        self.media_tabs.currentChanged.connect(self._on_media_tab_changed)
         self.btn_add.clicked.connect(self._add_selected_to_playlist)
         self.btn_load_more.clicked.connect(self._load_more)
         self.btn_remove.clicked.connect(self._remove_selected)
@@ -839,6 +862,8 @@ class MainWindow(QMainWindow):
         self._load_media(self._current_chat, offset=last)
 
     def _render_media(self, items: list) -> None:
+        items = [i for i in items if i.kind in self._media_kind_filter]
+        self._media_shown = items
         self.media_table.setSortingEnabled(False)
         self.media_table.setRowCount(len(items))
         for r, it in enumerate(items):
@@ -873,30 +898,60 @@ class MainWindow(QMainWindow):
 
     def _selected_media(self) -> list:
         rows = sorted({i.row() for i in self.media_table.selectedIndexes()})
-        return [m for m in (self._media_item_at(r) for r in rows) if m is not None]
+        sel = [m for m in (self._media_item_at(r) for r in rows) if m is not None]
+        if sel:
+            return sel
+        # Nothing selected: act on the whole visible (filtered) media view, so a
+        # tab + "▶ Play"/"+ Add" builds a playlist from that whole category.
+        return list(self._media_shown)
 
     def _play_selected(self) -> None:
         items = self._selected_media()
         if not items:
-            self._on_status("Select a video first")
+            self._on_status("Select a media item first")
             return
-        self.playlists.set_items([PlaylistItem(i.chat_id, i.message_id, i.title, i.duration, i.size)
+        label = self._media_tab_defs[self.media_tabs.currentIndex()][0]
+        if label == "Other":
+            # Files mpv cannot play (pdf, zip, …) — just download them.
+            self._download_items(items)
+            return
+        self.playlists.set_items([PlaylistItem(i.chat_id, i.message_id, i.title, i.duration, i.size, i.kind)
                                     for i in items])
         self.playlists.save()
         self._load_playlist_view()
         self._play(0)
 
+    def _download_items(self, items: list) -> None:
+        """Download the given media items into the local cache (no playback)."""
+        if not items:
+            return
+        self._on_status(f"Downloading {len(items)} item(s)…")
+        self.tg.download_all(
+            [(it.chat_id, it.message_id, it.title, it.size) for it in items]
+        )
+
+    def _on_media_tab_changed(self, idx: int) -> None:
+        self._media_kind_filter = self._media_tab_defs[idx][1]
+        self._update_play_button_label()
+        self._render_media(self._media_items)
+        self._update_empty_states()
+
+    def _update_play_button_label(self) -> None:
+        label = self._media_tab_defs[self.media_tabs.currentIndex()][0]
+        self.btn_play_media.setText("Download" if label == "Other" else "▶ Play")
+        uppercase_button(self.btn_play_media)
+
     def _add_selected_to_playlist(self) -> None:
         items = self._selected_media()
         if not items:
-            self._on_status("Select a video first")
+            self._on_status("Select a media item first")
             return
         existing = {p.message_id for p in self.playlists.items()}
         added = 0
         for i in items:
             if i.message_id in existing:
                 continue
-            self.playlists.add_item(PlaylistItem(i.chat_id, i.message_id, i.title, i.duration, i.size))
+            self.playlists.add_item(PlaylistItem(i.chat_id, i.message_id, i.title, i.duration, i.size, i.kind))
             existing.add(i.message_id)
             added += 1
         if added:
@@ -911,10 +966,13 @@ class MainWindow(QMainWindow):
         if item is None:
             return
         self.playlists.set_items([PlaylistItem(item.chat_id, item.message_id, item.title,
-                                        item.duration, item.size)])
+                                        item.duration, item.size, item.kind)])
         self.playlists.save()
         self._load_playlist_view()
-        self._play(0)
+        if item.kind == "other":
+            self._download_items([item])
+        else:
+            self._play(0)
 
     # ---------------- playlist view ----------------
     def _load_playlist_view(self) -> None:

@@ -1,6 +1,7 @@
 """Tests for playlist filter, model and persistence."""
 
 from __future__ import annotations
+from types import SimpleNamespace
 
 import json
 
@@ -12,6 +13,7 @@ from telegram_player.playlist import (
     PlaylistItem,
     PlaylistStore,
     filter_videos,
+    classify_media,
 )
 
 
@@ -183,3 +185,49 @@ def test_collection_new_playlist_auto_names_around_collisions(tmp_path):
     col.new_playlist("Playlist 3")
     col.new_playlist()                            # should become Playlist 2
     assert col.names() == ["Playlist 1", "Playlist 3", "Playlist 2"]
+
+
+# ---------------- classify_media (media-type tabs) ----------------
+def _m(mid, *, media="video", mime="video/mp4", size=100, dur=None, photo=False,
+       animated=False, name="clip.mp4"):
+    doc = None
+    if not photo:
+        attrs = []
+        if dur is not None:
+            cls = "DocumentAttributeAudio" if mime.startswith("audio/") else "DocumentAttributeVideo"
+            attrs.append(SimpleNamespace(cls=cls, duration=dur))
+        if animated:
+            attrs.append(SimpleNamespace(cls="DocumentAttributeAnimated"))
+        doc = SimpleNamespace(mime_type=mime, size=size, attributes=attrs)
+    return SimpleNamespace(
+        chat_id=1, id=mid,
+        media=SimpleNamespace(),  # any non-None, non-WebPage media
+        photo=(SimpleNamespace(sizes=[SimpleNamespace(size=size)]) if photo else None),
+        document=doc,
+        video=(doc if media == "video" else None),
+        file=SimpleNamespace(name=name),
+        message=f"clip {mid}",
+    )
+
+
+def test_classify_media_kinds():
+    msgs = [
+        _m(1, media="video", mime="video/mp4", dur=12),
+        _m(2, media="audio", mime="audio/mpeg", dur=30),
+        _m(3, photo=True),
+        _m(4, mime="image/gif"),
+        _m(5, mime="application/pdf"),
+    ]
+    out = classify_media(msgs)
+    kinds = {i.message_id: i.kind for i in out}
+    assert kinds == {1: "video", 2: "audio", 3: "photo", 4: "gif", 5: "other"}
+    # duration + size carried through
+    assert [i.duration for i in out if i.message_id == 2][0] == 30
+    assert [i.size for i in out if i.message_id == 3][0] == 100
+
+
+def test_classify_media_skips_webpage_and_empty():
+    from telethon.tl.types import MessageMediaWebPage
+    wp = _m(1); wp.media = MessageMediaWebPage(webpage=())
+    empty = SimpleNamespace(chat_id=1, id=2, media=None, photo=None, document=None)
+    assert classify_media([wp, empty]) == []

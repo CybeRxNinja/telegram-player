@@ -21,7 +21,7 @@ VENV_PY_DIR="$ROOT/.venv/bin"
 export PATH="$VENV_PY_DIR:$PATH"
 
 APP_NAME="Telegram-Player"
-VERSION="0.1.16"
+VERSION="0.1.17"
 APP_ID="telegram-player"
 OUT_IMG="$ROOT/dist/${APP_NAME}-${VERSION}-x86_64.AppImage"
 
