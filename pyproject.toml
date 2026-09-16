@@ -8,7 +8,7 @@ version = "0.1.18"
 description = "Minimal Telegram video player (Telethon + bundled mpv, streamed via byte-range HTTP)"
 requires-python = ">=3.10"
 dependencies = [
-    "telethon==1.44.0",
+    "telethon==1.45.0",
     "PyQt6==6.11.0",
     "segno==1.6.6",
 ]
